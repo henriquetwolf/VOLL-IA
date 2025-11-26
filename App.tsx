@@ -3,7 +3,7 @@ import { Layout } from './components/Layout';
 import { AuthForm } from './components/AuthForm';
 import { StudioProfile } from './components/StudioProfile';
 import { Assistant } from './components/Assistant';
-import { mockBackend } from './services/mockBackend';
+import { api } from './services/api';
 import { supabase } from './services/supabaseClient';
 import { User, ViewState } from './types';
 import { Activity, Users, TrendingUp } from 'lucide-react';
@@ -64,7 +64,7 @@ function App() {
 
   useEffect(() => {
     // Initial Session Check
-    mockBackend.getCurrentSession().then((currentUser) => {
+    api.getCurrentSession().then((currentUser) => {
       if (currentUser) {
         setUser(currentUser);
       }
@@ -74,7 +74,6 @@ function App() {
     // Listen for Auth Changes (Login, Logout, Auto-refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
-        // Re-map user using the helper from mockBackend (or inline)
         const mappedUser: User = {
             id: session.user.id,
             email: session.user.email || '',
@@ -91,7 +90,7 @@ function App() {
   }, []);
 
   const handleLogout = async () => {
-    await mockBackend.logout();
+    await api.logout();
     // State update handled by onAuthStateChange
   };
 

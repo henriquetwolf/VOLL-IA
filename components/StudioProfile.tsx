@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Studio, User } from '../types';
-import { mockBackend } from '../services/mockBackend';
+import { api } from '../services/api';
 import { Save, Building2, MapPin, Phone, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface StudioProfileProps {
@@ -29,7 +29,7 @@ export const StudioProfile: React.FC<StudioProfileProps> = ({ user }) => {
 
   const loadData = async () => {
     try {
-      const data = await mockBackend.getStudio(user.id);
+      const data = await api.getStudio(user.id);
       setStudio(data);
       setFormData({
         name: data.name,
@@ -37,8 +37,8 @@ export const StudioProfile: React.FC<StudioProfileProps> = ({ user }) => {
         address: data.address,
         phone: data.phone
       });
-    } catch (err) {
-      setError('Falha ao carregar dados do estúdio.');
+    } catch (err: any) {
+      setError(err.message || 'Falha ao carregar dados do estúdio.');
     } finally {
       setLoading(false);
     }
@@ -51,7 +51,7 @@ export const StudioProfile: React.FC<StudioProfileProps> = ({ user }) => {
     setSuccessMsg('');
 
     try {
-      const updated = await mockBackend.updateStudio(user.id, formData);
+      const updated = await api.updateStudio(user.id, formData);
       setStudio(updated);
       setSuccessMsg('Dados atualizados com sucesso!');
       

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { mockBackend } from '../services/mockBackend';
+import { api } from '../services/api';
 import { User } from '../types';
 import { Loader2 } from 'lucide-react';
 
@@ -24,10 +24,10 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onLoginSuccess }) => {
     try {
       let user: User;
       if (isLogin) {
-        user = await mockBackend.login(email, password);
+        user = await api.login(email, password);
       } else {
         if (!name) throw new Error("Nome é obrigatório.");
-        user = await mockBackend.register(name, email, password);
+        user = await api.register(name, email, password);
       }
       onLoginSuccess(user);
     } catch (err: any) {

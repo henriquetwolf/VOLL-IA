@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Bot, Send, User as UserIcon, Sparkles } from 'lucide-react';
 import { getGeminiResponse } from '../services/geminiService';
 import { ChatMessage, Studio, User } from '../types';
-import { mockBackend } from '../services/mockBackend';
+import { api } from '../services/api';
 
 interface AssistantProps {
   user: User;
@@ -23,7 +23,7 @@ export const Assistant: React.FC<AssistantProps> = ({ user }) => {
 
   useEffect(() => {
     // Load studio context for better AI answers
-    mockBackend.getStudio(user.id).then(setStudio).catch(() => {});
+    api.getStudio(user.id).then(setStudio).catch(() => {});
   }, [user.id]);
 
   const scrollToBottom = () => {

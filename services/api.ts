@@ -1,7 +1,7 @@
 import { User, Studio } from '../types';
 import { supabase } from './supabaseClient';
 
-// Helper to map Supabase User to App User
+// Helper para converter usuário do Supabase para o tipo do App
 const mapSupabaseUser = (sbUser: any): User => {
   return {
     id: sbUser.id,
@@ -10,26 +10,24 @@ const mapSupabaseUser = (sbUser: any): User => {
   };
 };
 
-export const mockBackend = {
-  // Auth Logic
+export const api = {
+  // --- Autenticação ---
+
   register: async (name: string, email: string, password: string): Promise<User> => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { name }, // Save name in user_metadata
+        data: { name }, // Salva o nome nos metadados do usuário
       },
     });
 
     if (error) throw new Error(error.message);
     
-    // Removida a verificação de sessão (confirmação de e-mail) para login direto.
-    // Nota: Certifique-se de que "Confirm Email" esteja DESATIVADO no painel do Supabase.
-    
+    // Sucesso no cadastro. Se a confirmação de e-mail estiver desligada,
+    // o usuário já estará logado.
     if (!data.user) throw new Error("Erro ao criar usuário.");
 
-    // Se o Supabase estiver configurado para não pedir confirmação, 
-    // data.session deve existir aqui. Se não existir, o usuário precisará fazer login manualmente.
     return mapSupabaseUser(data.user);
   },
 
@@ -54,21 +52,22 @@ export const mockBackend = {
     return session?.user ? mapSupabaseUser(session.user) : null;
   },
 
-  // Studio Data Logic
+  // --- Dados do Estúdio (Banco de Dados) ---
+
   getStudio: async (userId: string): Promise<Studio> => {
-    // Tenta buscar o estúdio existente
+    // 1. Tenta buscar o estúdio existente no banco
     const { data, error } = await supabase
       .from('studios')
       .select('*')
       .eq('owner_id', userId)
-      .maybeSingle(); // maybeSingle evita erro se não existir registro
+      .maybeSingle(); // maybeSingle não joga erro se não encontrar (retorna null)
 
     if (error) {
-      console.error("Erro ao buscar estúdio:", error);
-      throw new Error(error.message);
+      console.error("Erro Supabase:", error);
+      throw new Error("Erro de conexão ao buscar estúdio.");
     }
 
-    // Se encontrou, retorna formatado
+    // 2. Se encontrou, retorna os dados
     if (data) {
       return {
         id: data.id,
@@ -80,23 +79,28 @@ export const mockBackend = {
       };
     }
 
-    // Se não encontrou, cria um novo (Lazy Creation)
-    // Primeiro verificamos se temos sessão para evitar erro de RLS
+    // 3. Se NÃO encontrou, precisamos criar um novo (Lazy Creation).
+    // Antes de inserir, verificamos se a sessão está ativa para não violar o RLS.
     const { data: sessionData } = await supabase.auth.getSession();
     if (!sessionData.session) {
-      throw new Error("Sessão expirada. Faça login novamente para criar seu estúdio.");
+      throw new Error("Sessão não detectada. Tente fazer login novamente.");
     }
 
     const { data: newData, error: createError } = await supabase
       .from('studios')
-      .insert([{ owner_id: userId, name: '', cnpj: '', address: '', phone: '' }])
+      .insert([{ 
+        owner_id: userId, 
+        name: '', 
+        cnpj: '', 
+        address: '', 
+        phone: '' 
+      }])
       .select()
       .single();
       
     if (createError) {
       console.error("Erro ao criar estúdio:", createError);
-      // Retorna uma mensagem de erro legível em vez de [object Object]
-      throw new Error(createError.message || "Erro desconhecido ao inicializar estúdio.");
+      throw new Error("Falha ao inicializar o registro do estúdio. Tente recarregar a página.");
     }
 
     return {
@@ -110,12 +114,14 @@ export const mockBackend = {
   },
 
   updateStudio: async (userId: string, studioData: Partial<Studio>): Promise<Studio> => {
+    // Prepara o objeto payload apenas com campos definidos
     const dbPayload: any = {};
     if (studioData.name !== undefined) dbPayload.name = studioData.name;
     if (studioData.cnpj !== undefined) dbPayload.cnpj = studioData.cnpj;
     if (studioData.address !== undefined) dbPayload.address = studioData.address;
     if (studioData.phone !== undefined) dbPayload.phone = studioData.phone;
 
+    // Atualiza onde o owner_id for igual ao usuário logado
     const { data, error } = await supabase
       .from('studios')
       .update(dbPayload)
