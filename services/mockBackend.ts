@@ -1,97 +1,141 @@
 import { User, Studio } from '../types';
+import { supabase } from './supabaseClient';
 
-// Simulation of a backend database using LocalStorage
-const USERS_KEY = 'pm_users';
-const STUDIOS_KEY = 'pm_studios';
-const CURRENT_USER_KEY = 'pm_current_user';
+// Helper to map Supabase User to App User
+const mapSupabaseUser = (sbUser: any): User => {
+  return {
+    id: sbUser.id,
+    email: sbUser.email || '',
+    name: sbUser.user_metadata?.name || sbUser.email?.split('@')[0] || 'Usuário',
+  };
+};
 
 export const mockBackend = {
   // Auth Logic
   register: async (name: string, email: string, password: string): Promise<User> => {
-    await new Promise(resolve => setTimeout(resolve, 800)); // Simulate network latency
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { name }, // Save name in user_metadata
+      },
+    });
 
-    const usersStr = localStorage.getItem(USERS_KEY);
-    const users: User[] = usersStr ? JSON.parse(usersStr) : [];
+    if (error) throw new Error(error.message);
+    if (!data.user) throw new Error("Erro ao criar usuário.");
 
-    if (users.find(u => u.email === email)) {
-      throw new Error('Este e-mail já está cadastrado.');
+    // Create the studio entry immediately linked to this user
+    const { error: studioError } = await supabase
+      .from('studios')
+      .insert([
+        { 
+          owner_id: data.user.id,
+          name: '',
+          cnpj: '',
+          address: '',
+          phone: ''
+        }
+      ]);
+
+    if (studioError) {
+      console.error("Error creating studio record:", studioError);
+      // We don't throw here to allow login, studio can be created later if missing
     }
 
-    const newUser: User = {
-      id: crypto.randomUUID(),
-      email,
-      name,
-    };
-
-    users.push(newUser);
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    
-    // Create an empty studio entry for this user immediately
-    const studiosStr = localStorage.getItem(STUDIOS_KEY);
-    const studios: Studio[] = studiosStr ? JSON.parse(studiosStr) : [];
-    
-    const newStudio: Studio = {
-        id: crypto.randomUUID(),
-        ownerId: newUser.id,
-        name: '',
-        cnpj: '',
-        address: '',
-        phone: ''
-    };
-    studios.push(newStudio);
-    localStorage.setItem(STUDIOS_KEY, JSON.stringify(studios));
-
-    return newUser;
+    return mapSupabaseUser(data.user);
   },
 
   login: async (email: string, password: string): Promise<User> => {
-    await new Promise(resolve => setTimeout(resolve, 800));
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    const usersStr = localStorage.getItem(USERS_KEY);
-    const users: User[] = usersStr ? JSON.parse(usersStr) : [];
-    const user = users.find(u => u.email === email);
+    if (error) throw new Error(error.message);
+    if (!data.user) throw new Error("Usuário não encontrado.");
 
-    // In a real app, check password hash here. 
-    // For demo, we just check if user exists.
-    if (!user) {
-      throw new Error('Usuário não encontrado.');
-    }
-
-    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
-    return user;
+    return mapSupabaseUser(data.user);
   },
 
-  logout: () => {
-    localStorage.removeItem(CURRENT_USER_KEY);
+  logout: async () => {
+    await supabase.auth.signOut();
   },
 
-  getCurrentUser: (): User | null => {
-    const userStr = localStorage.getItem(CURRENT_USER_KEY);
-    return userStr ? JSON.parse(userStr) : null;
+  // Note: This replaces the sync getCurrentUser with an async fetch or session check
+  // The App component will now listen to auth state changes directly, but this helper is useful
+  getCurrentSession: async (): Promise<User | null> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.user ? mapSupabaseUser(session.user) : null;
   },
 
   // Studio Data Logic
   getStudio: async (userId: string): Promise<Studio> => {
-    await new Promise(resolve => setTimeout(resolve, 400));
-    const studiosStr = localStorage.getItem(STUDIOS_KEY);
-    const studios: Studio[] = studiosStr ? JSON.parse(studiosStr) : [];
-    
-    const studio = studios.find(s => s.ownerId === userId);
-    if (!studio) throw new Error("Studio data missing");
-    return studio;
+    // Note: 'userId' is passed but we should rely on RLS (Row Level Security) using the auth session
+    const { data, error } = await supabase
+      .from('studios')
+      .select('*')
+      .eq('owner_id', userId)
+      .single();
+
+    if (error) {
+      // If no studio exists (legacy user or error), return a placeholder or create one
+      if (error.code === 'PGRST116') { // code for no rows found
+         // Auto-create if missing
+         const { data: newData, error: createError } = await supabase
+            .from('studios')
+            .insert([{ owner_id: userId, name: '', cnpj: '', address: '', phone: '' }])
+            .select()
+            .single();
+            
+         if (!createError && newData) {
+             return {
+                 id: newData.id,
+                 ownerId: newData.owner_id,
+                 name: newData.name || '',
+                 cnpj: newData.cnpj || '',
+                 address: newData.address || '',
+                 phone: newData.phone || ''
+             };
+         }
+      }
+      throw new Error(error.message);
+    }
+
+    // Map DB snake_case to TS camelCase
+    return {
+      id: data.id,
+      ownerId: data.owner_id,
+      name: data.name || '',
+      cnpj: data.cnpj || '',
+      address: data.address || '',
+      phone: data.phone || ''
+    };
   },
 
-  updateStudio: async (userId: string, data: Partial<Studio>): Promise<Studio> => {
-    await new Promise(resolve => setTimeout(resolve, 600));
-    const studiosStr = localStorage.getItem(STUDIOS_KEY);
-    let studios: Studio[] = studiosStr ? JSON.parse(studiosStr) : [];
+  updateStudio: async (userId: string, studioData: Partial<Studio>): Promise<Studio> => {
+    // Map TS camelCase to DB snake_case for update
+    const dbPayload: any = {};
+    if (studioData.name !== undefined) dbPayload.name = studioData.name;
+    if (studioData.cnpj !== undefined) dbPayload.cnpj = studioData.cnpj;
+    if (studioData.address !== undefined) dbPayload.address = studioData.address;
+    if (studioData.phone !== undefined) dbPayload.phone = studioData.phone;
 
-    const index = studios.findIndex(s => s.ownerId === userId);
-    if (index === -1) throw new Error("Studio not found");
+    const { data, error } = await supabase
+      .from('studios')
+      .update(dbPayload)
+      .eq('owner_id', userId)
+      .select()
+      .single();
 
-    studios[index] = { ...studios[index], ...data };
-    localStorage.setItem(STUDIOS_KEY, JSON.stringify(studios));
-    
-    return studios[index];
+    if (error) throw new Error(error.message);
+
+    return {
+      id: data.id,
+      ownerId: data.owner_id,
+      name: data.name || '',
+      cnpj: data.cnpj || '',
+      address: data.address || '',
+      phone: data.phone || ''
+    };
   }
 };

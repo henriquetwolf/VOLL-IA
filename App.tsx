@@ -4,6 +4,7 @@ import { AuthForm } from './components/AuthForm';
 import { StudioProfile } from './components/StudioProfile';
 import { Assistant } from './components/Assistant';
 import { mockBackend } from './services/mockBackend';
+import { supabase } from './services/supabaseClient';
 import { User, ViewState } from './types';
 import { Activity, Users, TrendingUp } from 'lucide-react';
 
@@ -62,18 +63,36 @@ function App() {
   const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
-    // Check for existing session
-    const currentUser = mockBackend.getCurrentUser();
-    if (currentUser) {
-      setUser(currentUser);
-    }
-    setInitializing(false);
+    // Initial Session Check
+    mockBackend.getCurrentSession().then((currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+      }
+      setInitializing(false);
+    });
+
+    // Listen for Auth Changes (Login, Logout, Auto-refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        // Re-map user using the helper from mockBackend (or inline)
+        const mappedUser: User = {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Usuário'
+        };
+        setUser(mappedUser);
+      } else {
+        setUser(null);
+        setView(ViewState.DASHBOARD);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const handleLogout = () => {
-    mockBackend.logout();
-    setUser(null);
-    setView(ViewState.DASHBOARD);
+  const handleLogout = async () => {
+    await mockBackend.logout();
+    // State update handled by onAuthStateChange
   };
 
   if (initializing) {
@@ -81,7 +100,7 @@ function App() {
   }
 
   if (!user) {
-    return <AuthForm onLoginSuccess={setUser} />;
+    return <AuthForm onLoginSuccess={(u) => setUser(u)} />;
   }
 
   return (
